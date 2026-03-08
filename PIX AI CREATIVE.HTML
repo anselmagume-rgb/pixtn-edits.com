@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PIXTN – Advanced Creative Studio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: white;
+      font-family: Arial;
+      text-align: center;
+    }
+
+    nav {
+      background: #222;
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      border-bottom: 2px solid #333;
+      align-items: center;
+    }
+
+    canvas {
+      border: 2px solid white;
+      background: black;
+      margin-top: 10px;
+      cursor: crosshair;
+    }
+
+    button, input, select {
+      padding: 6px;
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 6px;
+    }
+
+    button:hover { background: #555; }
+
+    #timeline, #layers {
+      background: #000;
+      padding: 10px;
+      margin-top: 6px;
+    }
+
+    .layer-item {
+      padding: 4px;
+      border: 1px solid #333;
+      margin: 2px;
+      cursor: pointer;
+    }
+
+    .active-layer {
+      background: #444;
+    }
+
+    .brand {
+      font-weight: bold;
+      padding: 6px 12px;
+      border-radius: 12px;
+      background: linear-gradient(45deg, #ff4d4d, #ffcc00, #00ccff);
+      color: black;
+    }
+  </style>
+</head>
+
+<body>
+
+<nav>
+  <div class="brand">PIXTN • STEIN EDITS</div>
+
+  🎨 <input type="color" id="colorPicker" value="#ff0000">
+  📏 <input type="range" id="size" min="1" max="40" value="4">
+  🔤 <input type="number" id="fontSize" value="28">
+
+  🛠
+  <select id="tool">
+    <option value="select">Select</option>
+    <option value="brush">Brush</option>
+    <option value="flame">Flame 🔥</option>
+    <option value="eraser">Eraser</option>
+    <option value="rect">Rectangle</option>
+    <option value="circle">Circle</option>
+    <option value="text">Text</option>
+  </select>
+
+  ✨
+  <select id="style">
+    <option value="stroke">Outline</option>
+    <option value="fill">Fill</option>
+  </select>
+
+  🌗 Opacity <input type="range" id="opacity" min="0.1" max="1" step="0.1" value="1">
+
+  🖼 <input type="file" id="upload">
+
+  🌈 <button onclick="applyFilter('grayscale')">Grayscale</button>
+  🌈 <button onclick="applyFilter('invert')">Invert</button>
+
+  ↩ <button onclick="undo()">Undo</button>
+  ↪ <button onclick="redo()">Redo</button>
+  💾 <button onclick="saveImage()">Save</button>
+  💾 <button onclick="saveProject()">Save Project</button>
+  📂 <button onclick="loadProject()">Load Project</button>
+
+  🌌 Creator Mode <input type="checkbox" id="creatorMode">
+</nav>
+
+<canvas id="canvas" width="900" height="500"></canvas>
+
+<div id="timeline">
+  🎞 Frame:
+  <input type="range" id="frameSlider" min="0" max="0" value="0">
+  <span id="frameLabel">0</span>
+
+  <button onclick="addFrame()">➕ Frame</button>
+  <button onclick="play()">▶ Play</button>
+  <button onclick="stop()">⏹ Stop</button>
+</div>
+
+<div id="layers">
+  <h3>🧱 Layers</h3>
+  <div id="layerList"></div>
+  <button onclick="addLayer()">➕ Layer</button>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const tool = document.getElementById("tool");
+const colorPicker = document.getElementById("colorPicker");
+const size = document.getElementById("size");
+const fontSize = document.getElementById("fontSize");
+const opacitySlider = document.getElementById("opacity");
+const creatorMode = document.getElementById("creatorMode");
+
+const frameSlider = document.getElementById("frameSlider");
+const frameLabel = document.getElementById("frameLabel");
+
+let drawing = false;
+let startX, startY;
+let selected = null;
+let offsetX, offsetY;
+
+let frames = [
+  { layers: [ { name:"Layer 1", objects: [] } ] }
+];
+
+let currentFrame = 0;
+let currentLayer = 0;
+let history = [];
+let redoStack = [];
+let bgImage = null;
+let animation = null;
+
+function saveState() {
+  history.push(JSON.stringify(frames));
+  redoStack = [];
+}
+
+function undo() {
+  if (!history.length) return;
+  redoStack.push(JSON.stringify(frames));
+  frames = JSON.parse(history.pop());
+  redraw();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  history.push(JSON.stringify(frames));
+  frames = JSON.parse(redoStack.pop());
+  redraw();
+}
+
+function updateTimeline() {
+  frameSlider.max = frames.length - 1;
+  frameSlider.value = currentFrame;
+  frameLabel.textContent = currentFrame;
+}
+
+function updateLayers() {
+  const list = document.getElementById("layerList");
+  list.innerHTML = "";
+
+  frames[currentFrame].layers.forEach((layer, i) => {
+    const div = document.createElement("div");
+    div.textContent = layer.name;
+    div.className = "layer-item " + (i === currentLayer ? "active-layer":"");
+    div.onclick = () => { currentLayer = i; updateLayers(); };
+    list.appendChild(div);
+  });
+}
+
+updateTimeline();
+updateLayers();
+
+function addFrame() {
+  saveState();
+  frames.push({ layers: [ { name:"Layer 1", objects: [] } ] });
+  currentFrame = frames.length - 1;
+  updateTimeline();
+  updateLayers();
+  redraw();
+}
+
+function addLayer() {
+  saveState();
+  frames[currentFrame].layers.push({
+    name: "Layer " + (frames[currentFrame].layers.length + 1),
+    objects: []
+  });
+  updateLayers();
+}
+
+document.getElementById("upload").addEventListener("change", e => {
+  const file = e.target.files[0];
+  const reader = new FileReader();
+  reader.onload = event => {
+    const img = new Image();
+    img.onload = () => { bgImage = img; redraw(); };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+canvas.addEventListener("mousedown", e => {
+  const x = e.offsetX;
+  const y = e.offsetY;
+  startX = x; startY = y;
+
+  if (tool.value === "select") {
+    selected = getObjectAt(x, y);
+    if (selected) {
+      offsetX = x - selected.x;
+      offsetY = y - selected.y;
+    }
+    return;
+  }
+
+  if (tool.value === "text") {
+    const text = prompt("Enter text:");
+    if (!text) return;
+    saveState();
+    getLayer().objects.push({
+      type:"text", x, y, text,
+      color: colorPicker.value,
+      size: parseInt(fontSize.value),
+      opacity: parseFloat(opacitySlider.value)
+    });
+    redraw();
+    return;
+  }
+
+  drawing = true;
+  saveState();
+
+  if (tool.value === "brush" || tool.value === "eraser" || tool.value === "flame") {
+    getLayer().objects.push({
+      type:"path",
+      points:[{x,y}],
+      color: tool.value === "eraser" ? "black" : colorPicker.value,
+      size: size.value,
+      opacity: parseFloat(opacitySlider.value),
+      flame: tool.value === "flame"
+    });
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  const x = e.offsetX;
+  const y = e.offsetY;
+
+  if (selected) {
+    selected.x = x - offsetX;
+    selected.y = y - offsetY;
+    redraw();
+    return;
+  }
+
+  if (!drawing) return;
+  const obj = getLayer().objects.at(-1);
+  if (obj?.type === "path") {
+    obj.points.push({x,y});
+    redraw();
+  }
+});
+
+canvas.addEventListener("mouseup", () => {
+  drawing = false;
+  selected = null;
+});
+
+function getLayer() {
+  return frames[currentFrame].layers[currentLayer];
+}
+
+function redraw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if (bgImage)
+    ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+  frames[currentFrame].layers.forEach(layer => {
+    layer.objects.forEach(obj => {
+      ctx.globalAlpha = obj.opacity || 1;
+      ctx.strokeStyle = ctx.fillStyle = obj.color;
+
+      if (creatorMode.checked) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = obj.color;
+      } else ctx.shadowBlur = 0;
+
+      if (obj.type === "path") {
+        ctx.beginPath();
+        ctx.lineWidth = obj.size;
+
+        obj.points.forEach((p,i)=>{
+          if(i===0) ctx.moveTo(p.x,p.y);
+          else ctx.lineTo(p.x,p.y);
+        });
+
+        if (obj.flame) {
+          ctx.stroke();
+          ctx.shadowBlur = 20;
+          ctx.stroke();
+        } else ctx.stroke();
+      }
+
+      if (obj.type === "text") {
+        ctx.font = obj.size + "px Arial";
+        ctx.fillText(obj.text, obj.x, obj.y);
+      }
+    });
+  });
+
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+}
+
+function getObjectAt(x,y) {
+  for (let layer of frames[currentFrame].layers) {
+    for (let obj of layer.objects) {
+      if (obj.type === "text") {
+        ctx.font = obj.size + "px Arial";
+        const w = ctx.measureText(obj.text).width;
+        if (x>=obj.x && x<=obj.x+w && y<=obj.y && y>=obj.y-obj.size)
+          return obj;
+      }
+    }
+  }
+  return null;
+}
+
+function applyFilter(type) {
+  const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d = imgData.data;
+
+  for (let i=0;i<d.length;i+=4) {
+    let r=d[i], g=d[i+1], b=d[i+2];
+
+    if (type==="grayscale") {
+      const avg=(r+g+b)/3;
+      d[i]=d[i+1]=d[i+2]=avg;
+    }
+
+    if (type==="invert") {
+      d[i]=255-r; d[i+1]=255-g; d[i+2]=255-b;
+    }
+  }
+
+  ctx.putImageData(imgData,0,0);
+}
+
+function play() {
+  if (animation) return;
+  let f = 0;
+  animation = setInterval(() => {
+    currentFrame = f % frames.length;
+    updateTimeline();
+    redraw();
+    f++;
+  }, 200);
+}
+
+function stop() {
+  clearInterval(animation);
+  animation = null;
+}
+
+function saveImage() {
+  const link = document.createElement("a");
+  link.download = "pixtn.png";
+  link.href = canvas.toDataURL();
+  link.click();
+}
+
+function saveProject() {
+  const blob = new Blob([JSON.stringify(frames)], {type:"application/json"});
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "pixtn-project.json";
+  link.click();
+}
+
+function loadProject() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+  input.onchange = e => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      frames = JSON.parse(reader.result);
+      redraw();
+      updateTimeline();
+      updateLayers();
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+</script>
+
+</body>
+</html>
